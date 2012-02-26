@@ -9,17 +9,45 @@ static CGFloat reflectionOpacity;
 static int notify_token;
 static uint64_t lastOrientation;
 
+@interface SBIconView : UIView
+@end
+
+@interface SBIconView (Springtomize)
+- (CGFloat)springtomizeScaleFactor;
+@end
+
+static CATransform3D (*ScaledTransform)(SBIconView *);
+
+static CATransform3D ScaledTransformSpringtomize(SBIconView *iconView)
+{
+	CGFloat scale = [iconView springtomizeScaleFactor];
+	return CATransform3DScale(currentTransform, scale, scale, 1.0f);
+}
+
+static CATransform3D ScaledTransformDefault(SBIconView *iconView)
+{
+	return currentTransform;
+}
+
 %hook SBIconView
 
 - (void)didMoveToWindow
 {
 	%orig;
-	if (((UIView *)self).window) {
+	if (self.window) {
 		CFSetSetValue(icons, self);
-		((UIView *)self).layer.sublayerTransform = currentTransform;
+		self.layer.sublayerTransform = ScaledTransform(self);
 		CHIvar(self, _reflection, UIImageView *).alpha = reflectionOpacity;
 	} else {
 		CFSetRemoveValue(icons, self);
+	}
+}
+
+- (void)didMoveToSuperview
+{
+	%orig;
+	if (self.superview) {
+		self.layer.sublayerTransform = ScaledTransform(self);
 	}
 }
 
@@ -36,6 +64,8 @@ static uint64_t lastOrientation;
 - (void)applicationDidFinishLaunching:(UIApplication *)application
 {
 	%orig;
+	if ([%c(SBIconView) instancesRespondToSelector:@selector(springtomizeScaleFactor)])
+		ScaledTransform = ScaledTransformSpringtomize;
 	// This code is quite evil
 	SBAccelerometerInterface *accelerometer = [%c(SBAccelerometerInterface) sharedInstance];
 	NSMutableArray **_clients = CHIvarRef(accelerometer, _clients, NSMutableArray *);
@@ -81,15 +111,15 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 			return;
 	}
 	lastOrientation = orientation;
-	NSValue *value = [NSValue valueWithCATransform3D:currentTransform];
-	for (UIView *view in (id)icons) {
+	for (SBIconView *view in (id)icons) {
 		CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"sublayerTransform"];
-		animation.toValue = value;
+		CATransform3D transform = ScaledTransform(view);
+		animation.toValue = [NSValue valueWithCATransform3D:transform];
 		animation.duration = 0.2;
 		animation.removedOnCompletion = YES;
 		CALayer *layer = view.layer;
 		animation.fromValue = [NSValue valueWithCATransform3D:layer.sublayerTransform];
-		layer.sublayerTransform = currentTransform;
+		layer.sublayerTransform = transform;
 		[layer addAnimation:animation forKey:@"IconRotator"];
 		CHIvar(view, _reflection, UIImageView *).alpha = reflectionOpacity;
 	}
@@ -98,6 +128,7 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 %ctor
 {
 	%init;
+	ScaledTransform = ScaledTransformDefault;
 	currentTransform = CATransform3DIdentity;
 	icons = CFSetCreateMutable(kCFAllocatorDefault, 0, NULL);
 	notify_register_check("com.apple.springboard.rawOrientation", &notify_token);

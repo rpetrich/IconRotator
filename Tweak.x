@@ -5,6 +5,7 @@
 
 static CFMutableSetRef icons;
 static CATransform3D currentTransform;
+static CGFloat reflectionOpacity;
 static int notify_token;
 static uint64_t lastOrientation;
 
@@ -16,6 +17,7 @@ static uint64_t lastOrientation;
 	if (((UIView *)self).window) {
 		CFSetSetValue(icons, self);
 		((UIView *)self).layer.sublayerTransform = currentTransform;
+		CHIvar(self, _reflection, UIImageView *).alpha = reflectionOpacity;
 	} else {
 		CFSetRemoveValue(icons, self);
 	}
@@ -61,15 +63,19 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 	switch (orientation) {
 		case UIDeviceOrientationPortrait:
 			currentTransform = CATransform3DIdentity;
+			reflectionOpacity = 1.0f;
 			break;
 		case UIDeviceOrientationPortraitUpsideDown:
 			currentTransform = CATransform3DMakeRotation(M_PI, 0.0f, 0.0f, 1.0f);
+			reflectionOpacity = 0.0f;
 			break;
 		case UIDeviceOrientationLandscapeLeft:
 			currentTransform = CATransform3DMakeRotation(0.5f * M_PI, 0.0f, 0.0f, 1.0f);
+			reflectionOpacity = 0.0f;
 			break;
 		case UIDeviceOrientationLandscapeRight:
 			currentTransform = CATransform3DMakeRotation(-0.5f * M_PI, 0.0f, 0.0f, 1.0f);
+			reflectionOpacity = 0.0f;
 			break;
 		default:
 			return;
@@ -85,6 +91,7 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 		animation.fromValue = [NSValue valueWithCATransform3D:layer.sublayerTransform];
 		layer.sublayerTransform = currentTransform;
 		[layer addAnimation:animation forKey:@"IconRotator"];
+		CHIvar(view, _reflection, UIImageView *).alpha = reflectionOpacity;
 	}
 }
 

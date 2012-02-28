@@ -12,6 +12,18 @@ static uint64_t lastOrientation;
 @interface SBIconView : UIView
 @end
 
+@interface SBNowPlayingBarView : UIView
+@property (readonly, nonatomic) UIButton *toggleButton;
+@property (readonly, nonatomic) UIButton *airPlayButton;
+@end
+
+@interface SBNowPlayingBarMediaControlsView : UIView
+@property (readonly, nonatomic) UIButton *prevButton;
+@property (readonly, nonatomic) UIButton *playButton;
+@property (readonly, nonatomic) UIButton *nextButton;
+@property (readonly, nonatomic) UIButton *airPlayButton;
+@end
+
 @interface UIView (Springtomize)
 - (CGFloat)springtomizeScaleFactor;
 @end
@@ -70,6 +82,45 @@ static CATransform3D ScaledTransformDefault(UIView *iconView)
 
 %end
 
+static void ApplyRotatedViewTransform(UIView *view)
+{
+	if (view) {
+		CALayer *layer = view.layer;
+		layer.transform = ScaledTransform(view);
+		[layer setValue:@"transform" forKey:@"IconRotatorKeyPath"];
+		CFSetSetValue(icons, view);
+	}
+}
+
+
+%hook SBNowPlayingBarView
+
+- (void)didMoveToWindow
+{
+	%orig;
+	if (self.window) {
+		ApplyRotatedViewTransform(self.toggleButton);
+		ApplyRotatedViewTransform(self.airPlayButton);
+	}
+}
+
+%end
+
+%hook SBNowPlayingBarMediaControlsView
+
+- (void)didMoveToWindow
+{
+	%orig;
+	if (self.window) {
+		ApplyRotatedViewTransform(self.prevButton);
+		ApplyRotatedViewTransform(self.playButton);
+		ApplyRotatedViewTransform(self.nextButton);
+		ApplyRotatedViewTransform(self.airPlayButton);
+	}
+}
+
+%end
+
 %hook SBSearchController
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
@@ -78,11 +129,7 @@ static CATransform3D ScaledTransformDefault(UIView *iconView)
 	if (result) {
 		NSArray *subviews = result.subviews;
 		if ([subviews count]) {
-			UIView *icon = [subviews objectAtIndex:0];
-			CALayer *layer = icon.layer;
-			layer.transform = ScaledTransform(result);
-			[layer setValue:@"transform" forKey:@"IconRotatorKeyPath"];
-			CFSetSetValue(icons, icon);
+			ApplyRotatedViewTransform([subviews objectAtIndex:0]);
 		}
 	}
 	return result;

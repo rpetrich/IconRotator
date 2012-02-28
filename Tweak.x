@@ -12,22 +12,39 @@ static uint64_t lastOrientation;
 @interface SBIconView : UIView
 @end
 
-@interface SBIconView (Springtomize)
+@interface UIView (Springtomize)
 - (CGFloat)springtomizeScaleFactor;
 @end
 
-static CATransform3D (*ScaledTransform)(SBIconView *);
+static CATransform3D (*ScaledTransform)(UIView *);
 
-static CATransform3D ScaledTransformSpringtomize(SBIconView *iconView)
+static CATransform3D ScaledTransformSpringtomize(UIView *iconView)
 {
 	CGFloat scale = [iconView springtomizeScaleFactor];
 	return CATransform3DScale(currentTransform, scale, scale, 1.0f);
 }
 
-static CATransform3D ScaledTransformDefault(SBIconView *iconView)
+static CATransform3D ScaledTransformDefault(UIView *iconView)
 {
 	return currentTransform;
 }
+
+%hook UIView 
+
+- (void)didMoveToWindow
+{
+	if (!self.window)
+		CFSetRemoveValue(icons, self);
+	%orig;
+}
+
+- (void)dealloc
+{
+	CFSetRemoveValue(icons, self);
+	%orig;
+}
+
+%end
 
 %hook SBIconView
 
@@ -36,10 +53,10 @@ static CATransform3D ScaledTransformDefault(SBIconView *iconView)
 	%orig;
 	if (self.window) {
 		CFSetSetValue(icons, self);
-		self.layer.sublayerTransform = ScaledTransform(self);
+		CALayer *layer = self.layer;
+		layer.sublayerTransform = ScaledTransform(self);
+		[layer setValue:@"sublayerTransform" forKey:@"IconRotatorKeyPath"];
 		CHIvar(self, _reflection, UIImageView *).alpha = reflectionOpacity;
-	} else {
-		CFSetRemoveValue(icons, self);
 	}
 }
 
@@ -51,10 +68,24 @@ static CATransform3D ScaledTransformDefault(SBIconView *iconView)
 	}
 }
 
-- (void)dealloc
+%end
+
+%hook SBSearchController
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-	CFSetRemoveValue(icons, self);
-	%orig;
+	UIView *result = %orig;
+	if (result) {
+		NSArray *subviews = result.subviews;
+		if ([subviews count]) {
+			UIView *icon = [subviews objectAtIndex:0];
+			CALayer *layer = icon.layer;
+			layer.transform = ScaledTransform(result);
+			[layer setValue:@"transform" forKey:@"IconRotatorKeyPath"];
+			CFSetSetValue(icons, icon);
+		}
+	}
+	return result;
 }
 
 %end
@@ -64,7 +95,7 @@ static CATransform3D ScaledTransformDefault(SBIconView *iconView)
 - (void)applicationDidFinishLaunching:(UIApplication *)application
 {
 	%orig;
-	if ([%c(SBIconView) instancesRespondToSelector:@selector(springtomizeScaleFactor)])
+	if ([UIView instancesRespondToSelector:@selector(springtomizeScaleFactor)])
 		ScaledTransform = ScaledTransformSpringtomize;
 	// This code is quite evil
 	SBAccelerometerInterface *accelerometer = [%c(SBAccelerometerInterface) sharedInstance];
@@ -111,17 +142,20 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 			return;
 	}
 	lastOrientation = orientation;
-	for (SBIconView *view in (id)icons) {
-		CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"sublayerTransform"];
-		CATransform3D transform = ScaledTransform(view);
-		animation.toValue = [NSValue valueWithCATransform3D:transform];
+	for (UIView *view in (id)icons) {
+		CALayer *layer = view.layer;
+		NSString *keyPath = [layer valueForKey:@"IconRotatorKeyPath"];
+		CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:keyPath];
+		NSValue *toValue = [NSValue valueWithCATransform3D:ScaledTransform(view)];
+		animation.toValue = toValue;
 		animation.duration = 0.2;
 		animation.removedOnCompletion = YES;
-		CALayer *layer = view.layer;
-		animation.fromValue = [NSValue valueWithCATransform3D:layer.sublayerTransform];
-		layer.sublayerTransform = transform;
+		animation.fromValue = [layer.presentationLayer valueForKeyPath:keyPath];
+		[layer setValue:toValue forKeyPath:keyPath];
 		[layer addAnimation:animation forKey:@"IconRotator"];
-		CHIvar(view, _reflection, UIImageView *).alpha = reflectionOpacity;
+		UIImageView **imageView = CHIvarRef(view, _reflection, UIImageView *);
+		if (imageView)
+			(*imageView).alpha = reflectionOpacity;
 	}
 }
 

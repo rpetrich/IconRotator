@@ -137,13 +137,8 @@ static void ApplyRotatedViewTransform(UIView *view)
 
 %end
 
-%hook SpringBoard
-
-- (void)applicationDidFinishLaunching:(UIApplication *)application
+static void SetAccelerometerEnabled(BOOL enabled)
 {
-	%orig;
-	if ([UIView instancesRespondToSelector:@selector(springtomizeScaleFactor)])
-		ScaledTransform = ScaledTransformSpringtomize;
 	// This code is quite evil
 	SBAccelerometerInterface *accelerometer = [%c(SBAccelerometerInterface) sharedInstance];
 	NSMutableArray **_clients = CHIvarRef(accelerometer, _clients, NSMutableArray *);
@@ -151,16 +146,50 @@ static void ApplyRotatedViewTransform(UIView *view)
 		NSMutableArray *clients = *_clients;
 		if (!clients)
 			*_clients = clients = [[NSMutableArray alloc] init];
-		SBAccelerometerClient *client = [[%c(SBAccelerometerClient) alloc] init];
-		if (client) {
+		static SBAccelerometerClient *client;
+		if (!client) {
+			client = [[%c(SBAccelerometerClient) alloc] init];
 			[client setUpdateInterval:0.1];
-			[clients addObject:client];
 		}
-		[client release];
+		if (client) {
+			if (enabled) {
+				if ([clients indexOfObjectIdenticalTo:client] == NSNotFound)
+					[clients addObject:client];
+			} else {
+				[clients removeObjectIdenticalTo:client];
+			}
+		}
 	}
+	[accelerometer updateSettings];
+}
+
+%hook SpringBoard
+
+- (void)applicationDidFinishLaunching:(UIApplication *)application
+{
+	%orig;
+	if ([UIView instancesRespondToSelector:@selector(springtomizeScaleFactor)])
+		ScaledTransform = ScaledTransformSpringtomize;
+	SetAccelerometerEnabled(YES);
 }
 
 %end
+
+%hook SBAwayController
+
+- (void)dimScreen:(BOOL)animated
+{
+	%orig;
+	SetAccelerometerEnabled(NO);
+}
+
+- (void)undimScreen
+{
+	%orig;
+	SetAccelerometerEnabled(YES);
+}
+
+%end;
 
 static void OrientationChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
 {

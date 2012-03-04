@@ -28,6 +28,30 @@ static uint64_t lastOrientation;
 - (CGFloat)springtomizeScaleFactor;
 @end
 
+@interface SBOrientationLockManager : NSObject {
+	NSMutableSet *_lockOverrideReasons;
+	UIInterfaceOrientation _userLockedOrientation;
+}
++ (SBOrientationLockManager *)sharedInstance;
+- (void)restoreStateFromPrefs;
+- (id)init;
+- (void)dealloc;
+- (void)lock;
+- (void)lock:(UIInterfaceOrientation)lock;
+- (void)unlock;
+- (BOOL)isLocked;
+- (UIInterfaceOrientation)userLockOrientation;
+- (void)setLockOverrideEnabled:(BOOL)enabled forReason:(id)reason;
+- (void)enableLockOverrideForReason:(id)reason suggestOrientation:(UIInterfaceOrientation)orientation;
+- (void)enableLockOverrideForReason:(id)reason forceOrientation:(UIInterfaceOrientation)orientation;
+- (BOOL)lockOverrideEnabled;
+- (void)updateLockOverrideForCurrentDeviceOrientation;
+- (void)_updateLockStateWithChanges:(id)changes;
+- (void)_updateLockStateWithOrientation:(int)orientation changes:(id)changes;
+- (void)_updateLockStateWithOrientation:(int)orientation forceUpdateHID:(BOOL)forceHID changes:(id)changes;
+- (BOOL)_effectivelyLocked;
+@end
+
 static CATransform3D (*ScaledTransform)(UIView *);
 
 static CATransform3D ScaledTransformSpringtomize(UIView *iconView)
@@ -186,38 +210,35 @@ static void SetAccelerometerEnabled(BOOL enabled)
 - (void)undimScreen
 {
 	%orig;
-	SetAccelerometerEnabled(YES);
+	SBOrientationLockManager *olm = [%c(SBOrientationLockManager) sharedInstance];
+	if (![olm _effectivelyLocked])
+		SetAccelerometerEnabled(YES);
 }
 
 %end;
 
-static void OrientationChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
+static void UpdateWithOrientation(UIInterfaceOrientation orientation)
 {
-	uint64_t orientation = 0;
-	notify_get_state(notify_token, &orientation);
-	if (orientation == lastOrientation)
-		return;
 	switch (orientation) {
-		case UIDeviceOrientationPortrait:
+		case UIInterfaceOrientationPortrait:
 			currentTransform = CATransform3DIdentity;
 			reflectionOpacity = 1.0f;
 			break;
-		case UIDeviceOrientationPortraitUpsideDown:
+		case UIInterfaceOrientationPortraitUpsideDown:
 			currentTransform = CATransform3DMakeRotation(M_PI, 0.0f, 0.0f, 1.0f);
 			reflectionOpacity = 0.0f;
 			break;
-		case UIDeviceOrientationLandscapeLeft:
+		case UIInterfaceOrientationLandscapeRight:
 			currentTransform = CATransform3DMakeRotation(0.5f * M_PI, 0.0f, 0.0f, 1.0f);
 			reflectionOpacity = 0.0f;
 			break;
-		case UIDeviceOrientationLandscapeRight:
+		case UIInterfaceOrientationLandscapeLeft:
 			currentTransform = CATransform3DMakeRotation(-0.5f * M_PI, 0.0f, 0.0f, 1.0f);
 			reflectionOpacity = 0.0f;
 			break;
 		default:
 			return;
 	}
-	lastOrientation = orientation;
 	for (UIView *view in (id)icons) {
 		CALayer *layer = view.layer;
 		NSString *keyPath = [layer valueForKey:@"IconRotatorKeyPath"];
@@ -232,6 +253,71 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 		UIImageView **imageView = CHIvarRef(view, _reflection, UIImageView *);
 		if (imageView)
 			(*imageView).alpha = reflectionOpacity;
+	}
+}
+
+%hook SBOrientationLockManager
+
+- (void)_updateLockStateWithChanges:(id)changes
+{
+	%orig;
+	if ([self _effectivelyLocked]) {
+		SetAccelerometerEnabled(NO);
+		UpdateWithOrientation([self userLockOrientation]);
+	} else {
+		SetAccelerometerEnabled(YES);
+	}
+}
+
+- (void)_updateLockStateWithOrientation:(UIInterfaceOrientation)orientation forceUpdateHID:(BOOL)updateHID changes:(id)changes
+{
+	%orig;
+	if ([self _effectivelyLocked]) {
+		SetAccelerometerEnabled(NO);
+		UpdateWithOrientation([self userLockOrientation]);
+	} else {
+		SetAccelerometerEnabled(YES);
+	}
+}
+
+- (void)_updateLockStateWithOrientation:(UIInterfaceOrientation)orientation changes:(id)changes
+{
+	%orig;
+	if ([self _effectivelyLocked]) {
+		SetAccelerometerEnabled(NO);
+		UpdateWithOrientation([self userLockOrientation]);
+	} else {
+		SetAccelerometerEnabled(YES);
+	}
+}
+
+%end
+
+static void OrientationChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
+{
+	SBOrientationLockManager *olm = [%c(SBOrientationLockManager) sharedInstance];
+	if ([olm _effectivelyLocked])
+		return;
+	uint64_t orientation = 0;
+	notify_get_state(notify_token, &orientation);
+	if (UIDeviceOrientationIsValidInterfaceOrientation(orientation)) {
+		if (orientation != lastOrientation) {
+			lastOrientation = orientation;
+			switch (orientation) {
+				case UIDeviceOrientationPortrait:
+					UpdateWithOrientation(UIInterfaceOrientationPortrait);
+					break;
+				case UIDeviceOrientationPortraitUpsideDown:
+					UpdateWithOrientation(UIInterfaceOrientationPortraitUpsideDown);
+					break;
+				case UIDeviceOrientationLandscapeLeft:
+					UpdateWithOrientation(UIInterfaceOrientationLandscapeRight);
+					break;
+				case UIDeviceOrientationLandscapeRight:
+					UpdateWithOrientation(UIInterfaceOrientationLandscapeLeft);
+					break;
+			}
+		}
 	}
 }
 

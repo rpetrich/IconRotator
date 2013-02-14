@@ -5,5 +5,5 @@ Architecture: iphoneos-arm
 Version: 1.0
 Description: Rotating icons
 Name: IconRotator
-Depends: firmware (>= 5.0), mobilesubstrate
+Depends: firmware (>= 5), mobilesubstrate, firmware (<< 7)
 Author: Ryan Petrich <rpetrich+iconrotator@gmail.com>

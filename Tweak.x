@@ -7,7 +7,7 @@ static CFMutableSetRef icons;
 static CATransform3D currentTransform;
 static CGFloat reflectionOpacity;
 static int notify_token;
-static uint64_t lastOrientation;
+static UIInterfaceOrientation lastOrientation;
 
 @interface SBIconView : UIView
 @end
@@ -57,17 +57,17 @@ static uint64_t lastOrientation;
 - (void)updateOrientationAndAccelerometerSettings;
 @end
 
-static CATransform3D (*ScaledTransform)(UIView *);
+static CATransform3D (*ScaledTransform)(UIView *, CATransform3D);
 
-static CATransform3D ScaledTransformSpringtomize(UIView *iconView)
+static CATransform3D ScaledTransformSpringtomize(UIView *iconView, CATransform3D transform)
 {
 	CGFloat scale = [iconView springtomizeScaleFactor];
-	return CATransform3DScale(currentTransform, scale, scale, 1.0f);
+	return CATransform3DScale(transform, scale, scale, 1.0f);
 }
 
-static CATransform3D ScaledTransformDefault(UIView *iconView)
+static CATransform3D ScaledTransformDefault(UIView *iconView, CATransform3D transform)
 {
-	return currentTransform;
+	return transform;
 }
 
 %hook UIView 
@@ -87,39 +87,65 @@ static CATransform3D ScaledTransformDefault(UIView *iconView)
 
 %end
 
+typedef void (^RotatedViewUpdateBlock)(id view, UIInterfaceOrientation orientation, CATransform3D transform, NSTimeInterval duration);
+static RotatedViewUpdateBlock standardUpdateBlock = ^(id view, UIInterfaceOrientation orientation, CATransform3D transform, NSTimeInterval duration) {
+	CALayer *layer = [view layer];
+	if (duration) {
+		CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"transform"];
+		animation.toValue = [NSValue valueWithCATransform3D:transform];
+		animation.duration = duration;
+		animation.removedOnCompletion = YES;
+		animation.fromValue = [layer.presentationLayer valueForKeyPath:@"transform"];
+		[layer addAnimation:animation forKey:@"IconRotator"];
+	}
+	layer.transform = transform;
+};
+
+static RotatedViewUpdateBlock iconViewUpdateBlock = ^(id view, UIInterfaceOrientation orientation, CATransform3D transform, NSTimeInterval duration) {
+	transform = ScaledTransform(view, transform);
+	CALayer *layer = [view layer];
+	if (duration) {
+		CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"sublayerTransform"];
+		animation.toValue = [NSValue valueWithCATransform3D:transform];
+		animation.duration = duration;
+		animation.removedOnCompletion = YES;
+		animation.fromValue = [layer.presentationLayer valueForKeyPath:@"sublayerTransform"];
+		[layer addAnimation:animation forKey:@"IconRotator"];
+	}
+	layer.sublayerTransform = transform;
+	UIImageView **imageView = CHIvarRef(view, _reflection, UIImageView *);
+	if (imageView)
+		(*imageView).alpha = reflectionOpacity;
+};
+
+static void ApplyRotatedViewTransform(UIView *view, RotatedViewUpdateBlock updateBlock)
+{
+	if (view && updateBlock) {
+		[view.layer setValue:[[updateBlock copy] autorelease] forKey:@"IconRotatorBlock"];
+		CFSetSetValue(icons, view);
+		updateBlock(view, lastOrientation, currentTransform, 0.0);
+	}
+}
+
 %hook SBIconView
 
 - (void)didMoveToWindow
 {
 	%orig;
 	if (self.window) {
-		CFSetSetValue(icons, self);
-		CALayer *layer = self.layer;
-		layer.sublayerTransform = ScaledTransform(self);
-		[layer setValue:@"sublayerTransform" forKey:@"IconRotatorKeyPath"];
-		CHIvar(self, _reflection, UIImageView *).alpha = reflectionOpacity;
+		ApplyRotatedViewTransform(self, iconViewUpdateBlock);
 	}
 }
 
 - (void)didMoveToSuperview
 {
 	%orig;
-	if (self.superview) {
-		self.layer.sublayerTransform = ScaledTransform(self);
+	if (self.window) {
+		ApplyRotatedViewTransform(self, iconViewUpdateBlock);
 	}
 }
 
 %end
-
-static void ApplyRotatedViewTransform(UIView *view)
-{
-	if (view) {
-		CALayer *layer = view.layer;
-		layer.transform = ScaledTransform(view);
-		[layer setValue:@"transform" forKey:@"IconRotatorKeyPath"];
-		CFSetSetValue(icons, view);
-	}
-}
 
 
 %hook SBNowPlayingBarView
@@ -128,8 +154,8 @@ static void ApplyRotatedViewTransform(UIView *view)
 {
 	%orig;
 	if (self.window) {
-		ApplyRotatedViewTransform(self.toggleButton);
-		ApplyRotatedViewTransform(self.airPlayButton);
+		ApplyRotatedViewTransform(self.toggleButton, standardUpdateBlock);
+		ApplyRotatedViewTransform(self.airPlayButton, standardUpdateBlock);
 	}
 }
 
@@ -141,10 +167,10 @@ static void ApplyRotatedViewTransform(UIView *view)
 {
 	%orig;
 	if (self.window) {
-		ApplyRotatedViewTransform(self.prevButton);
-		ApplyRotatedViewTransform(self.playButton);
-		ApplyRotatedViewTransform(self.nextButton);
-		ApplyRotatedViewTransform(self.airPlayButton);
+		ApplyRotatedViewTransform(self.prevButton, standardUpdateBlock);
+		ApplyRotatedViewTransform(self.playButton, standardUpdateBlock);
+		ApplyRotatedViewTransform(self.nextButton, standardUpdateBlock);
+		ApplyRotatedViewTransform(self.airPlayButton, standardUpdateBlock);
 	}
 }
 
@@ -158,7 +184,7 @@ static void ApplyRotatedViewTransform(UIView *view)
 	if (result) {
 		NSArray *subviews = result.subviews;
 		if ([subviews count]) {
-			ApplyRotatedViewTransform([subviews objectAtIndex:0]);
+			ApplyRotatedViewTransform([subviews objectAtIndex:0], standardUpdateBlock);
 		}
 	}
 	return result;
@@ -266,21 +292,12 @@ static void UpdateWithOrientation(UIInterfaceOrientation orientation)
 		default:
 			return;
 	}
-	for (UIView *view in (id)icons) {
-		CALayer *layer = view.layer;
-		NSString *keyPath = [layer valueForKey:@"IconRotatorKeyPath"];
-		CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:keyPath];
-		NSValue *toValue = [NSValue valueWithCATransform3D:ScaledTransform(view)];
-		animation.toValue = toValue;
-		animation.duration = 0.2;
-		animation.removedOnCompletion = YES;
-		animation.fromValue = [layer.presentationLayer valueForKeyPath:keyPath];
-		[layer setValue:toValue forKeyPath:keyPath];
-		[layer addAnimation:animation forKey:@"IconRotator"];
-		UIImageView **imageView = CHIvarRef(view, _reflection, UIImageView *);
-		if (imageView)
-			(*imageView).alpha = reflectionOpacity;
-	}
+	[UIView animateWithDuration:0.2 animations:^{
+		for (UIView *view in (id)icons) {
+			RotatedViewUpdateBlock updateBlock = [view.layer valueForKey:@"IconRotatorBlock"];
+			updateBlock(view, orientation, currentTransform, 0.2);
+		}
+	}];
 }
 
 %hook SBOrientationLockManager

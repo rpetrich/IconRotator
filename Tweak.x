@@ -52,6 +52,11 @@ static uint64_t lastOrientation;
 - (BOOL)_effectivelyLocked;
 @end
 
+@interface SpringBoard (iOS6)
+- (void)setWantsOrientationEvents:(BOOL)wantsEvents;
+- (void)updateOrientationAndAccelerometerSettings;
+@end
+
 static CATransform3D (*ScaledTransform)(UIView *);
 
 static CATransform3D ScaledTransformSpringtomize(UIView *iconView)
@@ -163,6 +168,11 @@ static void ApplyRotatedViewTransform(UIView *view)
 
 static void SetAccelerometerEnabled(BOOL enabled)
 {
+	if ([UIApp respondsToSelector:@selector(setWantsOrientationEvents:)] && [UIApp respondsToSelector:@selector(updateOrientationAndAccelerometerSettings)]) {
+		[(SpringBoard *)UIApp setWantsOrientationEvents:enabled];
+		[(SpringBoard *)UIApp updateOrientationAndAccelerometerSettings];
+		return;
+	}
 	// This code is quite evil
 	SBAccelerometerInterface *accelerometer = [%c(SBAccelerometerInterface) sharedInstance];
 	NSMutableArray **_clients = CHIvarRef(accelerometer, _clients, NSMutableArray *);
@@ -213,6 +223,12 @@ static void SetAccelerometerEnabled(BOOL enabled)
 	SBOrientationLockManager *olm = [%c(SBOrientationLockManager) sharedInstance];
 	if (![olm _effectivelyLocked])
 		SetAccelerometerEnabled(YES);
+}
+
+- (void)updateOrientationForUndim
+{
+	%orig();
+	SetAccelerometerEnabled(YES);
 }
 
 %end;
@@ -293,13 +309,8 @@ static void UpdateWithOrientation(UIInterfaceOrientation orientation)
 
 %end
 
-static void OrientationChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
+static inline void UpdateWithDeviceOrientation(UIDeviceOrientation orientation)
 {
-	SBOrientationLockManager *olm = [%c(SBOrientationLockManager) sharedInstance];
-	if ([olm _effectivelyLocked])
-		return;
-	uint64_t orientation = 0;
-	notify_get_state(notify_token, &orientation);
 	if (UIDeviceOrientationIsValidInterfaceOrientation(orientation)) {
 		if (orientation != lastOrientation) {
 			lastOrientation = orientation;
@@ -321,12 +332,34 @@ static void OrientationChangedCallback(CFNotificationCenterRef center, void *obs
 	}
 }
 
+static void LegacyOrientationChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
+{
+	SBOrientationLockManager *olm = [%c(SBOrientationLockManager) sharedInstance];
+	if ([olm _effectivelyLocked])
+		return;
+	uint64_t orientation = 0;
+	notify_get_state(notify_token, &orientation);
+	UpdateWithDeviceOrientation((UIDeviceOrientation)orientation);
+}
+
+static void UIDeviceOrientationChangedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
+{
+	SBOrientationLockManager *olm = [%c(SBOrientationLockManager) sharedInstance];
+	if ([olm _effectivelyLocked])
+		return;
+	UpdateWithDeviceOrientation([UIDevice currentDevice].orientation);
+}
+
 %ctor
 {
 	%init;
 	ScaledTransform = ScaledTransformDefault;
 	currentTransform = CATransform3DIdentity;
 	icons = CFSetCreateMutable(kCFAllocatorDefault, 0, NULL);
-	notify_register_check("com.apple.springboard.rawOrientation", &notify_token);
-	CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, OrientationChangedCallback, CFSTR("com.apple.springboard.rawOrientation"), NULL, CFNotificationSuspensionBehaviorCoalesce);
+	if (kCFCoreFoundationVersionNumber < 783.0) {
+		notify_register_check("com.apple.springboard.rawOrientation", &notify_token);
+		CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, LegacyOrientationChangedCallback, CFSTR("com.apple.springboard.rawOrientation"), NULL, CFNotificationSuspensionBehaviorCoalesce);
+	} else {
+		CFNotificationCenterAddObserver(CFNotificationCenterGetLocalCenter(), NULL, UIDeviceOrientationChangedCallback, (CFStringRef)UIDeviceOrientationDidChangeNotification, NULL, CFNotificationSuspensionBehaviorCoalesce);
+	}
 }

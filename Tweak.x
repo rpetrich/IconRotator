@@ -233,6 +233,17 @@ static void SetAccelerometerEnabled(BOOL enabled)
 
 %end;
 
+%hook SBOrientationLockManager
+
+- (void)setLockOverrideEnabled:(BOOL)enabled forReason:(NSString *)reason
+{
+	if ([reason isEqualToString:@"SBOrientationLockForSwitcher"])
+		enabled = NO;
+	%orig();
+}
+
+%end
+
 static void UpdateWithOrientation(UIInterfaceOrientation orientation)
 {
 	switch (orientation) {

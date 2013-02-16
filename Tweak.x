@@ -231,6 +231,7 @@ static void SetAccelerometerEnabled(BOOL enabled)
 	if ([UIView instancesRespondToSelector:@selector(springtomizeScaleFactor)])
 		ScaledTransform = ScaledTransformSpringtomize;
 	SetAccelerometerEnabled(YES);
+	[[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
 }
 
 %end

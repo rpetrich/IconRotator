@@ -1,9 +1,13 @@
 Package: com.rpetrich.iconrotator
-Priority: optional
-Section: System
-Architecture: iphoneos-arm
-Version: 1.0
-Description: Rotating icons
 Name: IconRotator
 Depends: firmware (>= 5), mobilesubstrate, firmware (<< 7)
+Version: 1.0.1
+Architecture: iphoneos-arm
+Description: Rotating icons on your home screen
+Maintainer: thebigboss.org <http://thebigboss.org>
 Author: Ryan Petrich <rpetrich+iconrotator@gmail.com>
+Section: Tweaks
+Tag: purpose::extension
+Homepage: http://moreinfo.thebigboss.org/moreinfo/depiction.php?file=iconrotatorDp
+Depiction: http://moreinfo.thebigboss.org/moreinfo/depiction.php?file=iconrotatorDp
+dev: rpetrich
